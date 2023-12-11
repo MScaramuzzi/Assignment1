@@ -18,6 +18,8 @@ def ensure_reproducibility(seed):
 
 
 def detect_pctg_oovs(oov_arr:np.array, symbol:str) -> float:
+    # COunt the percentage of different types of oovs inside the data splits
+
     oov_arr_str = oov_arr.astype(str) # Create string from array to check the elements
     oov_arr_len = len(oov_arr)
 
@@ -53,53 +55,38 @@ def label_encoder(sentences: list[list[str]], tokenizer: keras.preprocessing.tex
   return tokenizer.texts_to_sequences(sentences)
 
 def label_decoder(sentences: list[list[int]], tokenizer: keras.preprocessing.text.Tokenizer()) -> list[list[str]]:
+  # TODO: comment me
   reverse_word_map = dict(map(reversed, tokenizer.word_index.items()))
   words = [[reverse_word_map.get(token) if token!=0 else 'PAD' for token in sentence] for sentence in sentences]
   return words
 
 
-def generate_weights(voc, vocabulary_dim,embedding_dim,glove_model) -> np.array:
-  embedding_weights = np.zeros((vocabulary_dim, embedding_dim))
-
+def generate_weights(voc, vocabulary_dim,embedding_dim,glove_model) -> np.array: 
+  embedding_weights = np.zeros((vocabulary_dim, embedding_dim)) # instantiate the embedding matrix
   embedding_voc = {}
 
   embedding_weights[1,:] = np.random.uniform(-0.5, 0.5, size=embedding_dim)  # embedding for the OOV token
   for word, index in voc.word2id.items():
     try:
-      embedding_weights[index, :] = glove_model[word]
-    except (KeyError, TypeError):
-      if word in embedding_voc:
-        embedding_weights[index, :] = embedding_voc[word]
-      if word not in embedding_voc:
-        subwords_embedding = {}
-        for elem in word.split('-'):
-          subwords_embedding.update({elem: np.random.uniform(-0.5, 0.5, size=embedding_dim)})
+      embedding_weights[index, :] = glove_model[word] # try to see if the word can be found in the glove model
+    except (KeyError, TypeError): # if it is not found then
+      
+      if word in embedding_voc:  # if it is in the embedding vocabulary (i.e. it is an oov of the train set)
+        embedding_weights[index, :] = embedding_voc[word] # update the dict adding the oov train set word 
+
+      if word not in embedding_voc: # if it is an oov from train and te
+        subwords_embedding = {} # instantiate dict containg all the embedding of the components of the compound word
+        for elem in word.split('-'): # split compound work
+          subwords_embedding.update({elem: np.random.uniform(-0.5, 0.5, size=embedding_dim)}) # assign random embedding
         for sub_word, _  in subwords_embedding.items():
           try:
             subwords_embedding.update({sub_word: glove_model[sub_word]})  # check if the word is in glove 6B
             subwords_embedding.update({sub_word: embedding_voc[sub_word]})  # check if the word is in the train oov list
           except KeyError:
             pass
-        embedding_voc.update({word:(sum(subwords_embedding.values())/len(subwords_embedding))})
-      embedding_weights[index, :] = embedding_voc[word]
+        embedding_voc.update({word:(sum(subwords_embedding.values())/len(subwords_embedding))}) # update the value with the mean
+      embedding_weights[index, :] = embedding_voc[word] # after having updated the voc set the 
   return embedding_weights
-
-def get_checkpoint_path(model):
-  checkpoint_name = f'{model.name}cp.ckpt'
-  checkpoint_path = os.path.join(os.getcwd(), 'Models', checkpoint_name)
-  checkpoint_dir = os.path.dirname(checkpoint_path)
-  return checkpoint_path
-
-def get_checkpoint(model, monitor: str = "val_loss"):
-  filepath = get_checkpoint_path(model)
-  cp =  tf.keras.callbacks.ModelCheckpoint(
-        filepath = filepath,
-        monitor = monitor,
-        save_best_only = True,
-        save_weights_only = True,
-        mode = 'max',
-        )
-  return cp
 
 
 def create_folders(seeds: list[int], subfolders: list[str]):
@@ -131,12 +118,15 @@ def get_crisps(pred3D: list[list[list[int]]]) -> list[list[list[int]]]:
     return np.apply_along_axis(get_crisp, -1, pred3D)
 
 def one_hot_reverse(pred:list[list[list[int]]], to_crisp: bool=True) -> np.ndarray:
+    # Reverse ohe by taking the argmax to take the class with maximum value
     if to_crisp:
         pred_crisp = get_crisps(pred)
     pred_class = [[np.argmax(token) for token in sentence] for sentence in pred_crisp]
     return np.array(pred_class)
 
 def decoding_pred(preds:list[list[list[int]]], tokenizer: keras.preprocessing.text.Tokenizer(), to_crisp: bool=True, inverse_one_hot: bool=True) -> np.ndarray:
+    
+    ## Decode a prediction
     if to_crisp:
         pred_crisp = get_crisps(preds)
     if inverse_one_hot:
@@ -184,8 +174,9 @@ from matplotlib.colors import Normalize
 def percentage_formatter(x, pos):
     return f"{x:.0f}%"
 
-# Barplot
 def barplot_label_distr(df_train: pd.DataFrame,df_val: pd.DataFrame) -> None:
+    # Display the distributions of the labels as a barplot 
+
     # Generate one row per tag thefore by unpacking the array containing all the labels in a sentence 
     df_expl_tr , df_expl_val = df_train.explode('label') , df_val.explode('label')
 
@@ -201,7 +192,6 @@ def barplot_label_distr(df_train: pd.DataFrame,df_val: pd.DataFrame) -> None:
     sns.set(style="whitegrid")
     default_palette = sns.color_palette()
 
-
     plt.figure(figsize=(20, 10),dpi=300)
     # Plot the training set bar chart
     plt.bar(label_counts_tr.index, pctg_lbl_cnts_tr, color=default_palette[0], 
@@ -214,15 +204,14 @@ def barplot_label_distr(df_train: pd.DataFrame,df_val: pd.DataFrame) -> None:
     # Plot the validation set bar chart next to the training set by offsetting it by 0.4 
     plt.bar(label_positions + 0.4, pctg_lbl_cnts_val.reindex(unique_labels, fill_value=0).values,
             color=default_palette[1], label='Validation Set', width=0.4,alpha=0.85)
-    
     plt.legend(fontsize='large')
     plt.gca().yaxis.set_major_formatter(FuncFormatter(percentage_formatter))
     plt.gca().xaxis.grid(False)
 
     plt.xticks(rotation=45, ha='center')
-    max_pctg = max(pctg_lbl_cnts_val.max(),pctg_lbl_cnts_tr.max())
+    max_pctg = max(pctg_lbl_cnts_val.max(),pctg_lbl_cnts_tr.max()) # useful for limiting the yticks
     plt.yticks(np.arange(0,max_pctg+2,1),fontsize='medium')
-    plt.xlim(-0.5, len(unique_labels) - 0.5)
+    plt.xlim(-0.5, len(unique_labels) - 0.5) 
 
     plt.ylabel('Percentage of label frequency in dataset (%)',fontsize='large')
     plt.xlabel('Labels',fontsize='large')
@@ -231,6 +220,8 @@ def barplot_label_distr(df_train: pd.DataFrame,df_val: pd.DataFrame) -> None:
 
 
 def boxplot_sents_len(df_train:pd.DataFrame, df_val:pd.DataFrame, df_test:pd.DataFrame) -> None :
+    # Plot the boxplot of sentence length across the three data splits
+
     plt.figure(figsize=(20, 8),dpi=300)
 
     train_lengths = pd.DataFrame({'sentence_length': df_train['word'].apply(len)})
@@ -259,20 +250,15 @@ def boxplot_sents_len(df_train:pd.DataFrame, df_val:pd.DataFrame, df_test:pd.Dat
     plt.ylabel("Data split",fontsize="medium")
     plt.show()
 
-def plot_history(model_history:dict, model_name:str, metric: str):
-    # visualise training history: accuracy
-    plt.plot(model_history[model_name].history[metric])
-    plt.plot(model_history[model_name].history[f'val_{metric}'])
-    plt.title('model accuracy')
-    plt.ylabel('accuracy')
-    plt.xlabel('epoch')
-    plt.legend(['train', 'val'], loc="lower right")
-    plt.show()
-
-
 
 from typing import Union
 def show_rec_rec_plot(prec, rec, set_type: Union['val','test'], labels_for_metrics: dict):
+    """
+    Plot precision and recall for each label using a color grading highlighting if the recall/precision is low 
+    with red and if it is high use greener color. 
+    """  
+
+
     sns.set(style="whitegrid")
     plt.figure(figsize=(12, 7))
     if set_type=='val': 

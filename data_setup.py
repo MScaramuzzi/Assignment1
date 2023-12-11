@@ -6,12 +6,6 @@ import pandas as pd
 import numpy as np
 
 def download_data(folder,url) -> None: 
-    """_summary_
-
-    Args:
-        folder (_type_): _description_
-        url (_type_): _description_
-    """       
 
     # Create directory if it does not exist
     if not os.path.exists(folder):
